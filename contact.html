@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact us</title>
+<meta name="description" content="Questions about an order or a product? Send us a message.">
+<meta name="theme-color" content="#050814">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='28' fill='%233D6BFF'/%3E%3Ccircle cx='50' cy='50' r='20' fill='%23050814'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&family=Manrope:wght@500;600;700;800&family=Oxanium:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body data-page="contact">
+<div id="site-header"></div>
+<main id="main">
+
+<section class="phead">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/index.html">Home</a> / Contact</nav>
+    <h1 class="h">Let us <span class="grad">help.</span></h1>
+    <p>Questions about an order or a product? Send us a message and we will reply by email.</p>
+  </div>
+</section>
+<section class="sec tight">
+  <div class="wrap two">
+    <div>
+      <div class="cardbox"><h3>Email</h3><p id="contactEmail"></p></div>
+      <div class="cardbox"><h3>Before you write</h3><p>Check the <a href="/faq.html">FAQ</a> and our <a href="/policy.html?p=shipping">shipping</a> and <a href="/policy.html?p=returns">returns</a> pages. Your answer may already be there.</p></div>
+    </div>
+    <form class="form" id="contactForm" novalidate>
+      <label>Your name<input name="name" type="text" autocomplete="name" required maxlength="100"></label>
+      <label>Email address<input name="email" type="email" autocomplete="email" required maxlength="150"></label>
+      <label>Message<textarea name="message" required maxlength="3000"></textarea></label>
+      <input class="hp" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button class="btn primary" type="submit">Send message</button>
+      <div id="formNote" role="status" hidden></div>
+    </form>
+  </div>
+</section>
+
+</main>
+<div id="site-footer"></div>
+<script src="/app.js" defer></script>
+</body>
+</html>
