@@ -2,11 +2,14 @@
   "use strict";
 
   /* Shop name, products, categories, prices, shipping and policies come from your admin panel (/admin). */
-  const VALUES = [
-    { icon: "🚚", title: "Fast shipping", text: "Free once your order reaches the free-shipping amount." },
-    { icon: "↩️", title: "Easy returns", text: "Changed your mind? Our returns policy has you covered." },
-    { icon: "🔒", title: "Secure checkout", text: "Card details never touch our site. Payments run on Stripe." },
-    { icon: "💬", title: "Real support", text: "Questions? Our team answers by email." },
+  let CHAT_ON = false;
+  const values = () => [
+    { icon: "🚚", title: "Free shipping that kicks in fast", text: "Reach the free-shipping amount and delivery is on us. Your cart shows exactly how close you are." },
+    { icon: "🔒", title: "Checkout you can trust", text: "Payments run on Stripe with industry-standard encryption. We never see or store your card details." },
+    { icon: "📦", title: "Track it like a pro", text: "Enter your order number and email to watch your order go from paid to shipped to delivered." },
+    CHAT_ON
+      ? { icon: "💬", title: "Answers on demand", text: "Ask our AI assistant about products, shipping or returns any time, or write to a real person on the contact page." }
+      : { icon: "💬", title: "Real people, real replies", text: "Questions about a product or an order? Write to us on the contact page. We read every message." },
   ];
 
   const PAGE = document.body.dataset.page || "home";
@@ -32,7 +35,7 @@
   /* ---------- shared layout ---------- */
   const NAV = [
     ["Home", "/index.html", "home"], ["Shop", "/shop.html", "shop"], ["About", "/about.html", "about"],
-    ["FAQ", "/faq.html", "faq"], ["Contact", "/contact.html", "contact"],
+    ["FAQ", "/faq.html", "faq"], ["Contact", "/contact.html", "contact"], ["Track order", "/track.html", "track"],
   ];
   function buildLayout() {
     const cur = PAGE === "product" ? "shop" : PAGE;
@@ -55,11 +58,12 @@
       <footer><div class="wrap">
         <div class="fgrid">
           <div><a class="logo" href="/index.html"><span class="mark"></span><span class="shopName">Store</span></a>
-            <p>Smart, useful products for every part of your day.</p></div>
+            <p>Small upgrades, big difference. Everything for home, car, kids, pets and style, in one cart with secure checkout.</p></div>
           <div><h4>Shop</h4><ul id="fshop"></ul></div>
           <div><h4>Help</h4><ul>
             <li><a href="/policy.html?p=shipping">Shipping</a></li>
             <li><a href="/policy.html?p=returns">Returns</a></li>
+            <li><a href="/track.html">Track your order</a></li>
             <li><a href="/faq.html">FAQ</a></li>
             <li><a href="/contact.html">Contact</a></li></ul></div>
           <div><h4>Company</h4><ul>
@@ -135,6 +139,7 @@
       <div class="stat"><b>${NICHES.length}</b><span>Categories</span></div>
       <div class="stat"><b>Stripe</b><span>Secure payments</span></div>`;
     const orb = NICHES.slice(0, 6);
+    if (!$(".hero .spot")) $(".hero").insertAdjacentHTML("afterbegin", '<div class="spot" aria-hidden="true"></div>');
     $("#orbit").innerHTML = `<div class="ring r1"></div><div class="ring r2"></div>
       <div class="spin">${orb.map((n, i) => `<a class="sat" href="/shop.html?cat=${esc(n.id)}" style="--a:${Math.round((360 / orb.length) * i)}deg;--c:${esc(n.bg)}" aria-label="Shop ${esc(n.label)}"><span>${esc(n.emoji)}</span></a>`).join("")}</div>
       <div class="core" aria-hidden="true">⚡</div>`;
@@ -148,7 +153,7 @@
     if (!trending.length) trending = PRODUCTS.slice(0, 10);
     $("#rail").innerHTML = trending.map(cardHTML).join("");
     $("#trending").hidden = !trending.length;
-    $("#values").innerHTML = VALUES.map((v) => `<div class="f"><i aria-hidden="true">${v.icon}</i><strong>${esc(v.title)}</strong><span>${esc(v.text)}</span></div>`).join("");
+    $("#values").innerHTML = values().map((v) => `<div class="f"><i aria-hidden="true">${v.icon}</i><strong>${esc(v.title)}</strong><span>${esc(v.text)}</span></div>`).join("");
   }
 
   function filtered() {
@@ -181,6 +186,7 @@
     state.niche !== "all" ? u.searchParams.set("cat", state.niche) : u.searchParams.delete("cat");
     state.q ? u.searchParams.set("q", state.q) : u.searchParams.delete("q");
     history.replaceState(null, "", u);
+    reveal();
   }
 
   function pageProduct() {
@@ -202,7 +208,7 @@
           <h1 class="h">${esc(p.name)}</h1>
           <div class="big">${money(p.price)}${old}</div>
           ${paras(p.desc)}
-          <ul class="perks"><li>Secure checkout with Stripe</li><li>Shipping and returns details in the footer</li><li>${p.soldOut ? "Currently sold out" : "In stock"}</li></ul>
+          <ul class="perks"><li>Secure checkout powered by Stripe</li><li>Follow your order on the tracking page, any time</li><li>Clear shipping and returns details before you buy</li><li>${p.soldOut ? "Currently sold out, check back soon" : "In stock and ready for your cart"}</li></ul>
           <div class="buy">${p.soldOut ? '<button class="btn primary" disabled>Sold out</button>' : `
             <div class="qty"><button data-pq="-1" aria-label="Fewer">−</button><span id="pq" aria-live="polite">1</span><button data-pq="1" aria-label="More">+</button></div>
             <button class="btn primary" data-add-page="${p.id}">Add to cart</button>`}</div>
@@ -274,7 +280,7 @@
       <small>Taxes and final shipping are shown at checkout.</small>`;
   }
   function setCart(id, qty) { if (qty <= 0) delete cart[id]; else cart[id] = Math.min(qty, 20); saveCart(); renderCart(); }
-  function addToCart(id, n = 1) { const p = prodById[id]; if (!p || p.soldOut) return; setCart(id, (cart[id] || 0) + n); toast("Added to cart"); }
+  function addToCart(id, n = 1, src) { const p = prodById[id]; if (!p || p.soldOut) return; setCart(id, (cart[id] || 0) + n); toast("Added to cart"); if (src) flyToCart(src); else bump(); }
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200); }
   function openCart() { $("#drawer").classList.add("on"); $("#veil").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false"); $("#closeCart").focus(); }
   function closeCart() { $("#drawer").classList.remove("on"); $("#veil").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); }
@@ -301,7 +307,12 @@
     const o = params.get("order");
     if (!o) return;
     const u = new URL(location.href); u.searchParams.delete("order"); history.replaceState(null, "", u);
-    if (o === "success") { cart = {}; saveCart(); renderCart(); showMsg("Thank you for your order!", "<p>Your payment was received. A receipt is on its way to your email.</p>"); }
+    if (o === "success") {
+      cart = {}; saveCart(); renderCart();
+      const n = parseInt(params.get("n"), 10);
+      showMsg("Thank you for your order!", `<p>Your payment was received. A receipt is on its way to your email.</p>${n ? `<p>Your order number is <b>#${n}</b>. Keep it: you can follow your order any time on the <a href="/track.html?n=${n}">tracking page</a>.</p>` : ""}`);
+      confetti();
+    }
     else if (o === "cancelled") toast("Checkout cancelled. Your cart is saved.");
   }
 
@@ -313,8 +324,8 @@
     if (t.id === "closeCart" || t.id === "veil") return closeCart();
     if (t.id === "menuBtn") { const o = $("#nav").classList.toggle("open"); return t.setAttribute("aria-expanded", String(o)); }
     if (t.id === "pay") return checkout();
-    if (t.dataset.add) return addToCart(+t.dataset.add);
-    if (t.dataset.addPage) return addToCart(+t.dataset.addPage, pageQty);
+    if (t.dataset.add) return addToCart(+t.dataset.add, 1, t.closest(".mw") && t.closest(".mw").querySelector(".media"));
+    if (t.dataset.addPage) return addToCart(+t.dataset.addPage, pageQty, $(".pgrid .media"));
     if (t.dataset.pq) { pageQty = Math.max(1, Math.min(20, pageQty + +t.dataset.pq)); return ($("#pq").textContent = pageQty); }
     if (t.dataset.inc) return setCart(t.dataset.inc, (cart[t.dataset.inc] || 0) + 1);
     if (t.dataset.dec) return setCart(t.dataset.dec, (cart[t.dataset.dec] || 0) - 1);
@@ -325,9 +336,204 @@
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCart(); });
 
+
+  /* ---------- order tracking page ---------- */
+  function pageTrack() {
+    const f = $("#trackForm"), note = $("#trackNote"), out = $("#trackResult");
+    if (params.get("n")) f.order.value = params.get("n");
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = f.querySelector("button[type=submit]");
+      btn.disabled = true; note.hidden = true;
+      try {
+        const r = await fetch("/api/track", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: f.order.value, email: f.email.value }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "We could not find your order.");
+        out.innerHTML = trackHTML(d.order);
+        requestAnimationFrame(() => requestAnimationFrame(() => { const i = out.querySelector(".track-bar i"); if (i) i.style.width = i.dataset.w; }));
+      } catch (err) { note.className = "note bad"; note.textContent = err.message; note.hidden = false; }
+      btn.disabled = false;
+    });
+  }
+  function trackHTML(o) {
+    const steps = ["Paid", "Shipped", "Delivered"];
+    const idx = { paid: 0, shipped: 1, delivered: 2 }[o.status];
+    const cancelled = o.status === "cancelled";
+    const w = cancelled ? 0 : Math.round(((idx + 1) / steps.length) * 100);
+    const msg = cancelled ? "This order was cancelled." : o.status === "paid" ? "We received your payment and we are preparing your order." : o.status === "shipped" ? "Your order is on its way." : "Your order was delivered. Enjoy!";
+    return `<div class="cardbox trk">
+      <h3>Order #${o.id}</h3>
+      <p>Placed on ${esc(new Date(o.placed).toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" }))}${o.city ? ` | Shipping to ${esc(o.city)}` : ""}</p>
+      ${cancelled ? "" : `<ol class="steps">${steps.map((s, i) => `<li class="${i <= idx ? "done" : ""}${i === idx ? " now" : ""}"><i>${i < idx ? "✓" : i + 1}</i><span>${s}</span></li>`).join("")}</ol>
+      <div class="track-bar"><i data-w="${w}%" style="width:0"></i></div>`}
+      <p class="track-msg">${esc(msg)}</p>
+      ${o.tracking ? `<p>Tracking number: <b>${esc(o.tracking)}</b></p>` : (o.status === "paid" ? "<p>A tracking number will appear here once your order ships.</p>" : "")}
+      <ul class="perks">${o.items.map((i) => `<li>${esc(i.qty)} x ${esc(i.name)}</li>`).join("")}</ul>
+      <p>Total paid: <b>${money(o.total_cents / 100)}</b></p>
+      <p>Need help? <a href="/contact.html">Contact us</a> with your order number.</p></div>`;
+  }
+
+  /* ---------- motion and effects ---------- */
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finePointer = matchMedia("(hover: hover) and (pointer: fine)").matches;
+  let io = null;
+
+  function countUp(el) {
+    if (!el || el.dataset.done) return;
+    const m = /^\d+$/.exec(el.textContent.trim());
+    if (!m) return;
+    el.dataset.done = "1";
+    const end = +m[0], t0 = performance.now(), dur = 1100;
+    el.textContent = "0";
+    const step = (t) => { const p = Math.min(1, (t - t0) / dur); el.textContent = Math.round(end * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  function reveal() {
+    if (reduceMotion || !("IntersectionObserver" in window)) return;
+    const sel = ".sec-head,.aiband,.statement,.cat,.card,.f,.banner,.stat,.faq details,.two>*,.cardbox,.form,.phead .wrap>*,.pgrid>*,.side";
+    io = io || new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        const el = en.target;
+        el.classList.add("in");
+        if (el.matches(".stat")) countUp(el.querySelector("b"));
+        el.addEventListener("transitionend", (ev) => { if (ev.propertyName === "opacity") el.classList.remove("rv", "in"); });
+        io.unobserve(el);
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -5% 0px" });
+    $$(sel).filter((e) => !e.dataset.rvd).forEach((e) => {
+      e.dataset.rvd = "1";
+      e.style.setProperty("--i", Math.min([...e.parentElement.children].indexOf(e), 8));
+      e.classList.add("rv");
+      io.observe(e);
+    });
+  }
+
+  function initFx() {
+    if (reduceMotion || !finePointer || initFx.done) return;
+    initFx.done = true;
+    let raf = 0;
+    document.addEventListener("pointermove", (e) => {
+      const m = e.target.closest && e.target.closest(".card .media");
+      if (m) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          const r = m.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+          m.style.setProperty("--rx", ((0.5 - y) * 10).toFixed(2) + "deg");
+          m.style.setProperty("--ry", ((x - 0.5) * 12).toFixed(2) + "deg");
+          m.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
+          m.style.setProperty("--my", (y * 100).toFixed(1) + "%");
+        });
+      }
+      const h = e.target.closest && e.target.closest(".hero");
+      if (h) {
+        const r = h.getBoundingClientRect();
+        h.style.setProperty("--mx", e.clientX - r.left + "px");
+        h.style.setProperty("--my", e.clientY - r.top + "px");
+        h.style.setProperty("--px", ((e.clientX - r.left) / r.width - 0.5) * -26 + "px");
+        h.style.setProperty("--py", ((e.clientY - r.top) / r.height - 0.5) * -26 + "px");
+      }
+    });
+    document.addEventListener("pointerout", (e) => {
+      const m = e.target.closest && e.target.closest(".card .media");
+      if (m && !m.contains(e.relatedTarget)) { m.style.setProperty("--rx", "0deg"); m.style.setProperty("--ry", "0deg"); }
+    });
+  }
+
+  function bump() { const c = $("#count"); if (!c) return; c.classList.remove("bump"); void c.offsetWidth; c.classList.add("bump"); }
+
+  function flyToCart(src) {
+    const cartBtn = $("#openCart");
+    if (reduceMotion || !src || !cartBtn || !src.animate) return bump();
+    const a = src.getBoundingClientRect(), b = cartBtn.getBoundingClientRect();
+    const f = document.createElement("div");
+    f.className = "fly";
+    const inner = src.querySelector("img,.emoji");
+    f.innerHTML = inner ? inner.outerHTML : "🛍️";
+    f.style.left = a.left + a.width / 2 - 32 + "px";
+    f.style.top = a.top + a.height / 2 - 32 + "px";
+    document.body.appendChild(f);
+    const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+    f.animate([
+      { transform: "translate(0,0) scale(1)", opacity: 1 },
+      { transform: `translate(${dx * 0.45}px,${dy * 0.45 - 90}px) scale(.85)`, opacity: 1, offset: 0.5 },
+      { transform: `translate(${dx}px,${dy}px) scale(.15)`, opacity: 0.25 },
+    ], { duration: 750, easing: "cubic-bezier(.5,0,.7,.4)" }).finished.then(() => { f.remove(); bump(); }).catch(() => f.remove());
+  }
+
+  function confetti() {
+    if (reduceMotion) return;
+    const box = document.createElement("div");
+    box.className = "confetti";
+    const colors = ["#22E5FF", "#3D6BFF", "#8B5CFF", "#38F2A5", "#FFD23F", "#FF7AB6"];
+    for (let i = 0; i < 70; i++) {
+      const s = document.createElement("span");
+      s.style.cssText = `left:${Math.random() * 100}%;background:${colors[i % 6]};--dx:${(Math.random() - 0.5) * 300}px;--r:${Math.random() * 720}deg;animation-delay:${Math.random() * 0.5}s;animation-duration:${2 + Math.random() * 1.5}s`;
+      box.appendChild(s);
+    }
+    ($("#infoDialog[open]") || document.body).appendChild(box);
+    setTimeout(() => box.remove(), 4500);
+  }
+
+  function skeleton() {
+    const card = '<div class="card"><div class="sk"></div><div class="sk-line"></div><div class="sk-line short"></div></div>';
+    const g = $("#grid"); if (g) g.innerHTML = card.repeat(8);
+    const r = $("#rail"); if (r) r.innerHTML = card.repeat(5);
+  }
+
+  /* ---------- AI support chat ---------- */
+  function initChat(available) {
+    if (!available || $("#chatFab")) return;
+    const box = document.createElement("div");
+    box.className = "chat";
+    box.innerHTML = `
+      <button class="chat-fab" id="chatFab" aria-label="Open support chat" aria-expanded="false"><span aria-hidden="true">💬</span><span class="chat-lbl">Ask us</span></button>
+      <section class="chat-panel" id="chatPanel" aria-label="Customer support chat" hidden>
+        <header><div><b>Support</b><small>AI assistant, replies instantly</small></div><button class="x" id="chatClose" aria-label="Close chat">✕</button></header>
+        <div class="chat-log" id="chatLog" aria-live="polite"></div>
+        <div class="chat-sugg" id="chatSugg">
+          <a href="/track.html">Where is my order?</a>
+          <button type="button" data-q="How much is shipping?">Shipping costs</button>
+          <button type="button" data-q="What is your return policy?">Returns</button>
+          <a href="/contact.html">Talk to a person</a>
+        </div>
+        <form class="chat-form" id="chatForm"><input id="chatIn" maxlength="500" placeholder="Type your question" autocomplete="off" aria-label="Your message"><button class="btn primary" type="submit" aria-label="Send">Send</button></form>
+        <small class="chat-note">AI can make mistakes. For orders, use <a href="/track.html">order tracking</a>.</small>
+      </section>`;
+    document.body.appendChild(box);
+    const fab = $("#chatFab"), panel = $("#chatPanel"), log = $("#chatLog"), input = $("#chatIn");
+    const hist = [];
+    const band = $("#aiBand"); if (band) band.hidden = false;
+    document.addEventListener("click", (e) => { if (e.target.closest("[data-open-chat]")) setOpen(true); });
+    const fmt = (t) => esc(t).replace(/\/(track|contact|shop|faq)\.html/g, '<a href="/$1.html">/$1.html</a>').replace(/\n/g, "<br>");
+    const add = (role, text) => { const d = document.createElement("div"); d.className = "cm " + role; d.innerHTML = fmt(text); log.appendChild(d); log.scrollTop = log.scrollHeight; return d; };
+    add("bot", "Hi! I am the AI assistant. Ask me about products, shipping or returns. I reply in English or French.");
+    const setOpen = (o) => { panel.hidden = !o; fab.setAttribute("aria-expanded", String(o)); if (o) input.focus(); };
+    fab.addEventListener("click", () => setOpen(panel.hidden));
+    $("#chatClose").addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) setOpen(false); });
+    async function send(text) {
+      text = text.trim(); if (!text) return;
+      add("user", text); hist.push({ role: "user", content: text }); input.value = "";
+      const typing = add("bot typing", "..."); typing.innerHTML = "<i></i><i></i><i></i>";
+      $("#chatSugg").hidden = true;
+      try {
+        const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: hist.slice(-8) }) });
+        const d = await r.json();
+        typing.remove();
+        if (!r.ok) throw new Error(d.error || "The assistant is unavailable.");
+        hist.push({ role: "assistant", content: d.reply }); add("bot", d.reply);
+      } catch (err) { typing.remove(); add("bot", err.message + " You can also write to us on /contact.html"); }
+    }
+    $("#chatForm").addEventListener("submit", (e) => { e.preventDefault(); send(input.value); });
+    $("#chatSugg").addEventListener("click", (e) => { const b = e.target.closest("[data-q]"); if (b) send(b.dataset.q); });
+  }
+
   /* ---------- start ---------- */
   (async function init() {
     buildLayout();
+    skeleton();
     document.addEventListener("click", (e) => { if (e.target.id === "infoDialog") e.target.close(); });
     let data;
     try {
@@ -339,6 +545,7 @@
       if (main) main.innerHTML = `<div class="wrap sec"><div class="empty"><strong>The store is temporarily unavailable.</strong><p>Please refresh the page in a moment.</p></div></div>`;
       return;
     }
+    CHAT_ON = !!data.chat;
     applyData(data); applyShell(); renderCart();
     if (PAGE === "home") pageHome();
     if (PAGE === "shop") {
@@ -349,6 +556,8 @@
     if (PAGE === "product") pageProduct();
     if (PAGE === "policy") pagePolicy();
     if (PAGE === "contact") pageContact();
+    if (PAGE === "track") pageTrack();
+    initFx(); reveal(); initChat(data.chat);
     handleReturn();
   })();
 })();
