@@ -7,6 +7,9 @@
   let tab = "orders";
   let cats = [];
   let ORDERS = [];
+  const LN = { fr: "Français", es: "Español", ar: "العربية" };
+  const TLANGS = ["fr", "es", "ar"];
+  const trBlock = (x, fields, hintHtml) => `<details class="tr"><summary>Translations: French, Spanish, Arabic</summary><div class="hint">Customers see these in their own language. Leave a field empty to show the English text. ${hintHtml}</div>${TLANGS.map((l) => `<div class="trl"><b>${LN[l]}</b>${fields.map(([f, label, area]) => `<label>${label}${area ? `<textarea name="${f}_${l}" maxlength="2000"${l === "ar" ? ' dir="rtl"' : ""}>${esc(x[f + "_" + l])}</textarea>` : `<input name="${f}_${l}" value="${esc(x[f + "_" + l])}" maxlength="120"${l === "ar" ? ' dir="rtl"' : ""}>`}</label>`).join("")}</div>`).join("")}</details>`;
   let returnAddr = "";
 
   const money = (c) => new Intl.NumberFormat("en-CA", { style: "currency", currency }).format((c || 0) / 100);
@@ -142,6 +145,23 @@
     setTimeout(() => w.print(), 350);
   }
 
+  /* ---------- AI translation helper ---------- */
+  async function aiTranslate(btn) {
+    const f = btn.closest("form"), kind = btn.dataset.translate, label = btn.textContent;
+    const E = (n) => (f.elements[n] ? f.elements[n].value : "");
+    let texts = {};
+    if (kind === "product") texts = { name: E("name"), description: E("description") };
+    if (kind === "category") texts = { label: E("label") };
+    if (kind === "settings") texts = { promo: E("promo"), policy_shipping: E("policy_shipping"), policy_returns: E("policy_returns"), policy_privacy: E("policy_privacy"), policy_terms: E("policy_terms") };
+    btn.disabled = true; btn.textContent = "Translating...";
+    try {
+      const r = await api("translate", "POST", { texts });
+      for (const l of TLANGS) for (const k of Object.keys(texts)) { const el = f.elements[k + "_" + l]; if (el && texts[k].trim()) el.value = r[l][k] || ""; }
+      toast("Translated. Please review the texts, then save.");
+    } catch (err) { if (err.message !== "Please sign in.") toast(err.message); }
+    btn.disabled = false; btn.textContent = label;
+  }
+
   /* ---------- products ---------- */
   async function viewProducts() {
     const [p, c] = await Promise.all([api("products"), api("categories")]);
@@ -173,6 +193,7 @@
           <div><button type="button" class="btn sec sm" id="rmImg"${x.image_id ? "" : " hidden"}>Remove photo</button></div></div>
           <input type="hidden" name="imageId" value="${x.image_id || ""}"></div>
         <label>Icon <small>(shown when there is no photo)</small><input name="emoji" value="${esc(x.emoji)}" maxlength="8" style="width:120px"></label>
+        ${trBlock(x, [["name", "Name", false], ["description", "Description", true]], '<button type="button" class="btn sec sm" data-translate="product">Translate with AI</button>')}
         <label class="chk"><input type="checkbox" name="active"${x.active === 0 ? "" : " checked"}> Visible in the store</label>
         <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="submit">Save product</button>
           ${isNew ? "" : `<button class="btn bad" type="button" data-del="${x.id}">Delete</button>`}</div>
@@ -205,6 +226,7 @@
       <div class="g3"><label>Name<input name="label" value="${esc(c.label)}" maxlength="60" required></label>
       <label>Id <small>(letters, numbers, dashes)</small><input name="id" value="${esc(c.id)}" ${isNew ? "" : "readonly"} pattern="[a-z0-9-]{2,30}" required></label>
       <label>Icon<input name="emoji" value="${esc(c.emoji)}" maxlength="8"></label></div>
+      ${trBlock(c, [["label", "Name", false]], '<button type="button" class="btn sec sm" data-translate="category">Translate with AI</button>')}
       <div class="g3"><label>Accent color<input type="color" name="bg" value="${esc(c.bg)}"></label>
       <label>Order<input name="sort" type="number" step="1" value="${c.sort ?? 0}"></label><div></div></div>
       <div style="display:flex;gap:10px"><button class="btn sm" type="submit">${isNew ? "Add category" : "Save"}</button>
@@ -234,18 +256,25 @@
         <div class="hint">${res.ai ? "AI support chat is connected. Visitors can use it on your store." : "AI support chat is not connected yet. It appears on your store after you add the ANTHROPIC_API_KEY secret in Cloudflare."}</div>
         <label class="chk"><input type="checkbox" name="chat_enabled"${s.chat_enabled === "0" ? "" : " checked"}> Show the AI support chat on my store</label>
         <label>Notes for the AI assistant <small>(delivery times, opening hours, anything customers often ask)</small><textarea name="chat_notes" rows="4" maxlength="1500">${esc(s.chat_notes)}</textarea></label>
+        <details class="tr"><summary>Store texts in French, Spanish and Arabic</summary>
+          <div class="hint">Shown to visitors in their language. Empty means the English text is shown. <button type="button" class="btn sec sm" data-translate="settings">Translate from English with AI</button></div>
+          ${TLANGS.map((l) => `<div class="trl"><b>${LN[l]}</b>
+            <label>Top banner text<input name="promo_${l}" value="${esc(s["promo_" + l])}" maxlength="160"${l === "ar" ? ' dir="rtl"' : ""}></label>
+            ${[["policy_shipping", "Shipping page"], ["policy_returns", "Returns page"], ["policy_privacy", "Privacy policy page"], ["policy_terms", "Terms of sale page"]].map(([k, lab]) => `<label>${lab}<textarea name="${k}_${l}" rows="4" maxlength="6000"${l === "ar" ? ' dir="rtl"' : ""}>${esc(s[k + "_" + l])}</textarea></label>`).join("")}</div>`).join("")}
+        </details>
         ${t("policy_shipping", "Shipping page", 5)}${t("policy_returns", "Returns page", 5)}${t("policy_privacy", "Privacy policy page", 6)}${t("policy_terms", "Terms of sale page", 6)}
         <div><button class="btn" type="submit">Save settings</button></div></form>`;
   }
 
   /* ---------- events ---------- */
   document.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],#logout,#rmImg");
+    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],[data-translate],#logout,#rmImg");
     if (!t) return;
     try {
       if (t.dataset.tab) return show(t.dataset.tab);
       if (t.dataset.print) return printOrder(ORDERS.find((x) => String(x.id) === t.dataset.print), t.dataset.mode);
       if (t.hasAttribute("data-csv")) return exportCsv();
+      if (t.dataset.translate) return aiTranslate(t);
       if (t.id === "logout") { await api("logout", "POST"); return showLogin(); }
       if (t.hasAttribute("data-new")) { if (!cats.length) cats = (await api("categories")).categories; return productForm({ category_id: cats[0]?.id }); }
       if (t.dataset.edit) { if (!cats.length) cats = (await api("categories")).categories; return productForm(JSON.parse(t.dataset.edit)); }
