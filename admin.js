@@ -145,6 +145,26 @@
     setTimeout(() => w.print(), 350);
   }
 
+  /* ---------- Stripe connection check ---------- */
+  async function runStripeCheck(btn) {
+    const out = $("#stripeOut"); btn.disabled = true; out.textContent = "Checking...";
+    try {
+      const d = await api("stripe-check"), rows = [], tips = [];
+      rows.push("Secret key: " + (!d.secretKey ? "MISSING" : d.keyMode === "test" ? "set, TEST mode (no real money)" : d.keyMode === "live" ? "set, LIVE mode (real money)" : "set, but it does not look like a Stripe secret key"));
+      rows.push("Webhook secret: " + (!d.webhookSecret ? "MISSING" : d.webhookLooksOk ? "set" : "set, but it should start with whsec_"));
+      if (d.secretKey) rows.push(d.stripeOk ? `Stripe accepts the key (account in ${d.account.country}, ${String(d.account.currency).toUpperCase()}). ${d.account.charges_enabled ? "It can take payments." : "It CANNOT take payments yet."}` : "Stripe refused the key: " + d.error);
+      if (d.lastError) rows.push(`Last failed checkout (${when(d.lastError.ts)}): ${d.lastError.message}`);
+      if (!d.secretKey) tips.push("Add the secret STRIPE_SECRET_KEY in Cloudflare (Runtime variables and secrets).");
+      else if (!d.stripeOk) tips.push("The key is wrong, incomplete or was revoked. Copy a new secret key from Stripe (Developers, API keys) and replace STRIPE_SECRET_KEY with Rotate in Cloudflare.");
+      else if (!d.account.charges_enabled) tips.push(d.keyMode === "live" ? "You are using a LIVE key but your Stripe account is not activated for real payments yet. Either finish the activation in Stripe, or use a test key (sk_test_...) from a Stripe sandbox while you test." : "This Stripe account cannot take payments yet. Finish the account setup in Stripe.");
+      else if (d.lastError) tips.push("Stripe works, but the last checkout failed. Read the message above, or send it to your helper.");
+      if (d.secretKey && d.stripeOk && !d.webhookSecret) tips.push("Add the secret STRIPE_WEBHOOK_SECRET (the whsec_ value of your Stripe webhook), otherwise paid orders will not appear here.");
+      if (!tips.length) tips.push("Everything looks connected. Make a test purchase to confirm.");
+      out.innerHTML = "<ul>" + rows.map((x) => `<li>${esc(x)}</li>`).join("") + "</ul><p><b>" + esc(tips.join(" ")) + "</b></p>";
+    } catch (err) { if (err.message !== "Please sign in.") out.textContent = err.message; }
+    btn.disabled = false;
+  }
+
   /* ---------- AI translation helper ---------- */
   async function aiTranslate(btn) {
     const f = btn.closest("form"), kind = btn.dataset.translate, label = btn.textContent;
@@ -246,6 +266,9 @@
     const res = await api("settings"), s = res.settings;
     const t = (k, l, rows) => `<label>${l}<textarea name="${k}" rows="${rows}">${esc(s[k])}</textarea></label>`;
     $("#view").innerHTML = `<div class="head"><h2>Settings</h2></div>
+      <div class="hint"><b>Payments (Stripe)</b>
+        <div id="stripeOut" style="margin:8px 0">Press the button to test the connection between your store and Stripe. Your keys are never shown.</div>
+        <button type="button" class="btn sm" data-stripe-check>Check Stripe connection</button></div>
       <form class="f" id="sform">
         <div class="g2"><label>Store name<input name="store_name" value="${esc(s.store_name)}" maxlength="80"></label>
           <label>Contact email<input name="contact_email" type="email" value="${esc(s.contact_email)}"></label></div>
@@ -268,13 +291,14 @@
 
   /* ---------- events ---------- */
   document.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],[data-translate],#logout,#rmImg");
+    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],[data-translate],[data-stripe-check],#logout,#rmImg");
     if (!t) return;
     try {
       if (t.dataset.tab) return show(t.dataset.tab);
       if (t.dataset.print) return printOrder(ORDERS.find((x) => String(x.id) === t.dataset.print), t.dataset.mode);
       if (t.hasAttribute("data-csv")) return exportCsv();
       if (t.dataset.translate) return aiTranslate(t);
+      if (t.hasAttribute("data-stripe-check")) return runStripeCheck(t);
       if (t.id === "logout") { await api("logout", "POST"); return showLogin(); }
       if (t.hasAttribute("data-new")) { if (!cats.length) cats = (await api("categories")).categories; return productForm({ category_id: cats[0]?.id }); }
       if (t.dataset.edit) { if (!cats.length) cats = (await api("categories")).categories; return productForm(JSON.parse(t.dataset.edit)); }

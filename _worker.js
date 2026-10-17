@@ -320,10 +320,15 @@ async function onRequestPost({ request, env }) {
     if (!res.ok || !session.url) {
       console.error("Stripe error", JSON.stringify(session));
       await env.DB.prepare("UPDATE orders SET status='failed' WHERE id=?").bind(orderId).run();
+      try {
+        await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('stripe_last_error', ?)")
+          .bind(JSON.stringify({ ts: new Date().toISOString(), message: String((session && session.error && session.error.message) || "Unknown Stripe error").slice(0, 300), code: String((session && session.error && (session.error.code || session.error.type)) || "") })).run();
+      } catch (e2) { console.error(e2); }
       return fail(tr(lang, "We could not start checkout. Please try again."), 502);
     }
 
     await env.DB.prepare("UPDATE orders SET stripe_session_id=? WHERE id=?").bind(session.id, orderId).run();
+    await env.DB.prepare("DELETE FROM settings WHERE key='stripe_last_error'").run();
     return json({ url: session.url });
   } catch (e) {
     console.error(e);
@@ -609,6 +614,7 @@ async function route(request, env, parts) {
     case "settings": return settings(request, env, method);
     case "messages": return messages(env, method, b);
     case "translate": return method === "POST" ? translate(request, env) : fail("Not found", 404);
+    case "stripe-check": return method === "GET" ? stripeCheck(env) : fail("Not found", 404);
     case "image": return method === "POST" ? uploadImage(request, env) : fail("Not found", 404);
   }
   return fail("Not found", 404);
@@ -859,6 +865,29 @@ async function translate(request, env) {
     out[l] = {};
     for (const [k] of entries) out[l][k] = String((parsed[l] && parsed[l][k]) || "").slice(0, 3000);
   }
+  return json(out);
+}
+
+/* ---------- Stripe connection check (admin only, never shows the keys) ---------- */
+async function stripeCheck(env) {
+  const key = env.STRIPE_SECRET_KEY || "";
+  const out = {
+    secretKey: !!key,
+    keyMode: /^(sk|rk)_test_/.test(key) ? "test" : /^(sk|rk)_live_/.test(key) ? "live" : key ? "unknown" : "",
+    webhookSecret: !!env.STRIPE_WEBHOOK_SECRET,
+    webhookLooksOk: /^whsec_/.test(env.STRIPE_WEBHOOK_SECRET || ""),
+    stripeOk: false,
+  };
+  if (key) {
+    try {
+      const r = await fetch("https://api.stripe.com/v1/account", { headers: { Authorization: `Bearer ${key}` } });
+      const d = await r.json();
+      if (r.ok) out.stripeOk = true, out.account = { country: d.country, currency: d.default_currency, charges_enabled: !!d.charges_enabled, payouts_enabled: !!d.payouts_enabled };
+      else out.error = String((d.error && d.error.message) || "Unknown error").slice(0, 300);
+    } catch (e) { out.error = "Could not reach Stripe."; }
+  }
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key='stripe_last_error'").first();
+  if (row) { try { out.lastError = JSON.parse(row.value); } catch (e) {} }
   return json(out);
 }
 
