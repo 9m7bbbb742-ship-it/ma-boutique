@@ -70,3 +70,4 @@ details.tr{border:1px solid var(--line);border-radius:14px;padding:12px 16px;bac
 details.tr summary{cursor:pointer;font-weight:700}
 .trl{display:grid;gap:10px;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
 .hint .btn{margin-top:8px}
+.extra-list{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.extra-list .thumb{position:relative;width:84px;height:84px}.extra-list .btn{position:absolute;top:-8px;right:-8px;padding:2px 8px;line-height:1.2}

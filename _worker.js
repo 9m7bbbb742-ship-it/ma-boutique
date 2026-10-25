@@ -129,6 +129,7 @@ const TR = {
     "You have sent many messages. Please try again later or use the contact page.": "Vous avez envoyé beaucoup de messages. Réessayez plus tard ou utilisez la page de contact.",
     "The assistant is unavailable right now. Please use the contact page.": "L'assistant est indisponible pour le moment. Veuillez utiliser la page de contact.",
     "Sorry, I could not answer that. Please use the contact page.": "Désolé, je n'ai pas pu répondre. Veuillez utiliser la page de contact.",
+    "Please tick the box to confirm you agree to receive emails.": "Veuillez cocher la case pour confirmer que vous acceptez de recevoir des courriels.",
     soldOut: (n) => `${n} est épuisé.`, onlyLeft: (k, n) => `Il ne reste que ${k} de ${n}.`,
   },
   es: {
@@ -150,6 +151,7 @@ const TR = {
     "You have sent many messages. Please try again later or use the contact page.": "Has enviado muchos mensajes. Inténtalo más tarde o usa la página de contacto.",
     "The assistant is unavailable right now. Please use the contact page.": "El asistente no está disponible ahora. Usa la página de contacto.",
     "Sorry, I could not answer that. Please use the contact page.": "Lo siento, no pude responder eso. Usa la página de contacto.",
+    "Please tick the box to confirm you agree to receive emails.": "Marca la casilla para confirmar que aceptas recibir correos.",
     soldOut: (n) => `${n} está agotado.`, onlyLeft: (k, n) => `Solo quedan ${k} de ${n}.`,
   },
   ar: {
@@ -171,6 +173,7 @@ const TR = {
     "You have sent many messages. Please try again later or use the contact page.": "لقد أرسلت رسائل كثيرة. حاول لاحقًا أو استخدم صفحة التواصل.",
     "The assistant is unavailable right now. Please use the contact page.": "المساعد غير متاح حاليًا. يرجى استخدام صفحة التواصل.",
     "Sorry, I could not answer that. Please use the contact page.": "عذرًا، لم أتمكن من الإجابة. يرجى استخدام صفحة التواصل.",
+    "Please tick the box to confirm you agree to receive emails.": "يرجى تحديد المربع لتأكيد موافقتك على استلام رسائل البريد الإلكتروني.",
     soldOut: (n) => `نفد المخزون من ${n}.`, onlyLeft: (k, n) => `لم يتبقَّ سوى ${k} من ${n}.`,
   },
 };
@@ -206,6 +209,10 @@ async function onRequestGet({ env, request }) {
        FROM products p WHERE p.active = 1 ORDER BY p.sort, p.id`
     ).bind(lang).all();
 
+    const extra = await env.DB.prepare("SELECT product_id, image_id FROM product_images ORDER BY product_id, sort, rowid").all();
+    const more = {};
+    for (const r of extra.results) (more[r.product_id] = more[r.product_id] || []).push(`/api/img/${r.image_id}`);
+
     const products = prods.results.map((p) => ({
       id: p.id,
       niche: p.category_id,
@@ -216,6 +223,7 @@ async function onRequestGet({ env, request }) {
       badge: p.badge || "",
       emoji: p.emoji || "",
       image: p.image_id ? `/api/img/${p.image_id}` : "",
+      images: [...(p.image_id ? [`/api/img/${p.image_id}`] : []), ...(more[p.id] || [])],
       soldOut: p.stock !== null && p.stock <= 0,
     }));
 
@@ -583,6 +591,35 @@ ${catalog}`;
 
 return { onRequestPost };
 })();
+const M_newsletter = (() => {
+
+// Newsletter sign-up: stores the address only with explicit consent. No email is sent from here.
+async function onRequestPost({ request, env }) {
+  try {
+    let b;
+    try { b = await request.json(); } catch { return fail("Invalid request."); }
+    const lang = normLang(b.lang);
+    if (b.website) return json({ ok: true }); // spam trap
+    const email = String(b.email || "").trim().toLowerCase().slice(0, 150);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail(tr(lang, "Please enter a valid email address."));
+    if (b.consent !== true) return fail(tr(lang, "Please tick the box to confirm you agree to receive emails."));
+
+    const ip = "news:" + (request.headers.get("CF-Connecting-IP") || "unknown");
+    const since = new Date(Date.now() - 3600e3).toISOString();
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE ip=? AND ts>?").bind(ip, since).first();
+    if (row.n >= 5) return fail(tr(lang, "Too many messages. Please try again later."), 429);
+    await env.DB.prepare("INSERT INTO login_attempts (ip, ts) VALUES (?, ?)").bind(ip, new Date().toISOString()).run();
+
+    await env.DB.prepare("INSERT OR IGNORE INTO subscribers (email, lang, created_at) VALUES (?,?,?)").bind(email, lang, new Date().toISOString()).run();
+    return json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return fail("Could not subscribe. Please try again.", 500);
+  }
+}
+
+return { onRequestPost };
+})();
 const M_admin = (() => {
 
 async function onRequest({ request, env, params }) {
@@ -613,6 +650,7 @@ async function route(request, env, parts) {
     case "orders": return orders(request, env, method, b);
     case "settings": return settings(request, env, method);
     case "messages": return messages(env, method, b);
+    case "subscribers": return subscribers(env, method, b);
     case "translate": return method === "POST" ? translate(request, env) : fail("Not found", 404);
     case "stripe-check": return method === "GET" ? stripeCheck(env) : fail("Not found", 404);
     case "image": return method === "POST" ? uploadImage(request, env) : fail("Not found", 404);
@@ -654,6 +692,26 @@ async function saveTr(env, scope, ref, entries) {
 }
 const trCols = (scope, refExpr, fields) => TL.flatMap((l) => fields.map((f) => `(SELECT value FROM translations WHERE scope='${scope}' AND ref=${refExpr} AND field='${f}' AND lang='${l}') AS ${f}_${l}`)).join(", ");
 
+async function saveExtra(env, pid, ids) {
+  if (!Array.isArray(ids)) return;
+  const clean = [...new Set(ids.map((x) => parseInt(x, 10)).filter(Number.isInteger))].slice(0, 5);
+  const st = [env.DB.prepare("DELETE FROM product_images WHERE product_id=?").bind(pid)];
+  clean.forEach((id, i) => st.push(env.DB.prepare("INSERT OR IGNORE INTO product_images (product_id, image_id, sort) VALUES (?,?,?)").bind(pid, id, i)));
+  await env.DB.batch(st);
+}
+
+async function subscribers(env, method, id) {
+  if (method === "GET") {
+    const { results } = await env.DB.prepare("SELECT email, lang, created_at FROM subscribers ORDER BY created_at DESC LIMIT 2000").all();
+    return json({ subscribers: results });
+  }
+  if (method === "DELETE" && id) {
+    await env.DB.prepare("DELETE FROM subscribers WHERE email=?").bind(decodeURIComponent(id)).run();
+    return json({ ok: true });
+  }
+  return fail("Not found", 404);
+}
+
 /* ---------- products ---------- */
 const BADGES = ["", "New", "Popular", "Sale"];
 
@@ -693,6 +751,10 @@ async function readProduct(env, b) {
 async function products(request, env, method, id) {
   if (method === "GET" && !id) {
     const { results } = await env.DB.prepare(`SELECT p.*, ${trCols("product", "CAST(p.id AS TEXT)", ["name", "description"])} FROM products p ORDER BY p.sort, p.id`).all();
+    const ex = await env.DB.prepare("SELECT product_id, image_id FROM product_images ORDER BY product_id, sort, rowid").all();
+    const byP = {};
+    for (const r of ex.results) (byP[r.product_id] = byP[r.product_id] || []).push(r.image_id);
+    results.forEach((x) => { x.extra_images = byP[x.id] || []; });
     return json({ products: results });
   }
   if (method === "POST" && !id) {
@@ -705,6 +767,7 @@ async function products(request, env, method, id) {
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     ).bind(v.category, v.name, v.description, v.price_cents, v.compare_cents, v.badge, v.emoji, v.stock, v.active, v.image_id, new Date().toISOString()).run();
     await saveTr(env, "product", ins.meta.last_row_id, [...readTr(body, "name", 120), ...readTr(body, "description", 2000)]);
+    await saveExtra(env, ins.meta.last_row_id, body.extraImageIds);
     return json({ id: ins.meta.last_row_id });
   }
   const pid = parseInt(id, 10);
@@ -718,12 +781,14 @@ async function products(request, env, method, id) {
       `UPDATE products SET category_id=?, name=?, description=?, price_cents=?, compare_at_cents=?, badge=?, emoji=?, stock=?, active=?, image_id=? WHERE id=?`
     ).bind(v.category, v.name, v.description, v.price_cents, v.compare_cents, v.badge, v.emoji, v.stock, v.active, v.image_id, pid).run();
     await saveTr(env, "product", pid, [...readTr(body, "name", 120), ...readTr(body, "description", 2000)]);
+    await saveExtra(env, pid, body.extraImageIds);
     return json({ ok: true });
   }
   if (method === "DELETE") {
     await env.DB.prepare("DELETE FROM products WHERE id=?").bind(pid).run();
     await env.DB.prepare("DELETE FROM translations WHERE scope='product' AND ref=?").bind(String(pid)).run();
-    await env.DB.prepare("DELETE FROM images WHERE id NOT IN (SELECT image_id FROM products WHERE image_id IS NOT NULL)").run();
+    await env.DB.prepare("DELETE FROM product_images WHERE product_id=?").bind(pid).run();
+    await env.DB.prepare("DELETE FROM images WHERE id NOT IN (SELECT image_id FROM products WHERE image_id IS NOT NULL) AND id NOT IN (SELECT image_id FROM product_images)").run();
     return json({ ok: true });
   }
   return fail("Not found", 404);
@@ -906,6 +971,8 @@ function ensureDb(env) {
       if (!has) await env.DB.batch([...SCHEMA, ...SEED].map((s) => env.DB.prepare(s)));
       // multilingual content (French, Spanish, Arabic): created once, also on stores that already exist
       await env.DB.prepare("CREATE TABLE IF NOT EXISTS translations (scope TEXT NOT NULL, ref TEXT NOT NULL, field TEXT NOT NULL, lang TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (scope, ref, field, lang))").run();
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS subscribers (email TEXT PRIMARY KEY, lang TEXT NOT NULL DEFAULT 'en', created_at TEXT NOT NULL)").run();
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS product_images (product_id INTEGER NOT NULL, image_id INTEGER NOT NULL, sort INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (product_id, image_id))").run();
       const flag = await env.DB.prepare("SELECT value FROM settings WHERE key='i18n_v2'").first();
       if (!flag) await env.DB.batch([...I18N_SEED, "INSERT OR REPLACE INTO settings (key, value) VALUES ('i18n_v2', '1')"].map((s) => env.DB.prepare(s)));
     })().catch((e) => { dbReady = null; throw e; });
@@ -939,9 +1006,26 @@ async function api(request, env, url) {
   if (parts[0] === "stripe-webhook" && m === "POST") return M_webhook.onRequestPost({ request, env });
   if (parts[0] === "track" && m === "POST") return M_track.onRequestPost({ request, env });
   if (parts[0] === "chat" && m === "POST") return M_chat.onRequestPost({ request, env });
+  if (parts[0] === "newsletter" && m === "POST") return M_newsletter.onRequestPost({ request, env });
   if (parts[0] === "img" && m === "GET") return M_img.onRequestGet({ env, params: { id: parts[1] } });
   if (parts[0] === "admin") return M_admin.onRequest({ request, env, params: { path: parts.slice(1) } });
   return json({ error: "Not found" }, 404);
+}
+
+function robots(url) {
+  return new Response(`User-agent: *
+Disallow: /admin
+Disallow: /api/
+Sitemap: ${url.origin}/sitemap.xml
+`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+}
+async function sitemap(env, url) {
+  const pages = ["/", "/shop.html", "/about.html", "/faq.html", "/contact.html", "/track.html", "/policy.html?p=shipping", "/policy.html?p=returns", "/policy.html?p=privacy", "/policy.html?p=terms"];
+  let ids = [];
+  if (env.DB) { await ensureDb(env); ids = (await env.DB.prepare("SELECT id FROM products WHERE active=1 ORDER BY id").all()).results.map((r) => "/product.html?id=" + r.id); }
+  const x = (s) => s.replace(/&/g, "&amp;");
+  const body = [...pages, ...ids].map((p) => `<url><loc>${x(url.origin + p)}</loc></url>`).join("");
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`, { headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
 }
 
 export default {
@@ -949,7 +1033,10 @@ export default {
     const url = new URL(request.url);
     let res;
     try {
-      res = url.pathname.startsWith("/api/") ? await api(request, env, url) : await env.ASSETS.fetch(request);
+      res = url.pathname.startsWith("/api/") ? await api(request, env, url)
+        : url.pathname === "/robots.txt" ? robots(url)
+        : url.pathname === "/sitemap.xml" ? await sitemap(env, url)
+        : await env.ASSETS.fetch(request);
     } catch (e) {
       console.error(e);
       res = json({ error: e.isConfig ? e.message : "Server error" }, 500);

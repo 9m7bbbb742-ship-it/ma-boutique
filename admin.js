@@ -7,6 +7,7 @@
   let tab = "orders";
   let cats = [];
   let ORDERS = [];
+  let EXTRA = [];
   const LN = { fr: "Français", es: "Español", ar: "العربية" };
   const TLANGS = ["fr", "es", "ar"];
   const trBlock = (x, fields, hintHtml) => `<details class="tr"><summary>Translations: French, Spanish, Arabic</summary><div class="hint">Customers see these in their own language. Leave a field empty to show the English text. ${hintHtml}</div>${TLANGS.map((l) => `<div class="trl"><b>${LN[l]}</b>${fields.map(([f, label, area]) => `<label>${label}${area ? `<textarea name="${f}_${l}" maxlength="2000"${l === "ar" ? ' dir="rtl"' : ""}>${esc(x[f + "_" + l])}</textarea>` : `<input name="${f}_${l}" value="${esc(x[f + "_" + l])}" maxlength="120"${l === "ar" ? ' dir="rtl"' : ""}>`}</label>`).join("")}</div>`).join("")}</details>`;
@@ -45,7 +46,7 @@
 
   /* ---------- shell ---------- */
   function shell() {
-    const tabs = [["orders", "Orders"], ["products", "Products"], ["categories", "Categories"], ["messages", "Messages"], ["settings", "Settings"]];
+    const tabs = [["orders", "Orders"], ["products", "Products"], ["categories", "Categories"], ["messages", "Messages"], ["subscribers", "Subscribers"], ["settings", "Settings"]];
     app.innerHTML = `<div class="top"><div class="in"><b>Store admin</b><a href="/" target="_blank" rel="noopener">View store</a><button id="logout">Sign out</button></div></div>
       <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
       <main><div class="panel" id="view"></div></main>`;
@@ -54,7 +55,7 @@
     tab = t;
     document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
     $("#view").innerHTML = `<div class="empty">Loading...</div>`;
-    try { await ({ orders: viewOrders, products: viewProducts, categories: viewCategories, messages: viewMessages, settings: viewSettings })[t](); }
+    try { await ({ orders: viewOrders, products: viewProducts, categories: viewCategories, messages: viewMessages, subscribers: viewSubscribers, settings: viewSettings })[t](); }
     catch (e) { if (e.message !== "Please sign in.") $("#view").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   }
   async function boot() {
@@ -193,8 +194,13 @@
         <div><b>${esc(x.name)}</b> ${x.active ? "" : '<span class="chip hidden">Hidden</span>'}<small>${esc(label[x.category_id] || "No category")} | ${money(x.price_cents)} | ${x.stock === null ? "Unlimited stock" : x.stock + " in stock"}</small></div>
         <button class="btn sec sm" data-edit='${esc(JSON.stringify(x))}'>Edit</button></div>`).join("") : `<div class="empty">No products yet. Add your first product.</div>`}`;
   }
+  function renderExtra() {
+    const l = $("#extraList"); if (!l) return;
+    l.innerHTML = EXTRA.map((id, i) => `<div class="thumb"><img src="/api/img/${id}" alt=""><button type="button" class="btn bad sm" data-rmextra="${i}" aria-label="Remove photo ${i + 1}">x</button></div>`).join("");
+  }
   function productForm(x = {}) {
     const isNew = !x.id;
+    EXTRA = (x.extra_images || []).slice();
     $("#view").innerHTML = `<div class="head"><h2>${isNew ? "Add product" : "Edit product"}</h2><button class="btn sec sm" data-back>Back</button></div>
       <form class="f" id="pform" data-id="${x.id || ""}">
         <label>Name<input name="name" value="${esc(x.name)}" maxlength="120" required></label>
@@ -212,12 +218,14 @@
           <div><label>Photo<input type="file" id="file" accept="image/*"></label><small id="imgNote">Photos are resized automatically.</small>
           <div><button type="button" class="btn sec sm" id="rmImg"${x.image_id ? "" : " hidden"}>Remove photo</button></div></div>
           <input type="hidden" name="imageId" value="${x.image_id || ""}"></div>
+        <div class="extra"><label>More photos <small>(optional, up to 5 in total)</small><input type="file" id="extraFile" accept="image/*" multiple></label><div class="extra-list" id="extraList"></div></div>
         <label>Icon <small>(shown when there is no photo)</small><input name="emoji" value="${esc(x.emoji)}" maxlength="8" style="width:120px"></label>
         ${trBlock(x, [["name", "Name", false], ["description", "Description", true]], '<button type="button" class="btn sec sm" data-translate="product">Translate with AI</button>')}
         <label class="chk"><input type="checkbox" name="active"${x.active === 0 ? "" : " checked"}> Visible in the store</label>
         <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="submit">Save product</button>
           ${isNew ? "" : `<button class="btn bad" type="button" data-del="${x.id}">Delete</button>`}</div>
       </form>`;
+    renderExtra();
   }
   function fileToJpeg(file, max = 900) {
     return new Promise((res, rej) => {
@@ -261,6 +269,15 @@
         <p>${esc(m.message)}</p><button class="btn bad sm" data-delmsg="${m.id}">Delete</button></div>`).join("") : `<div class="empty">No messages yet. Contact form messages appear here.</div>`}`;
   }
 
+  /* ---------- newsletter subscribers ---------- */
+  async function viewSubscribers() {
+    const { subscribers } = await api("subscribers");
+    $("#view").innerHTML = `<div class="head"><h2>Subscribers</h2>${subscribers.length ? '<button class="btn sec sm" data-subcsv>Export CSV</button>' : ""}</div>
+      <div class="hint">People who ticked the consent box on your store. Use this list only to send them the news they agreed to receive, and remove anyone who asks to unsubscribe.</div>
+      ${subscribers.length ? subscribers.map((x) => `<div class="msg"><b>${esc(x.email)}</b> <small>${esc(x.lang.toUpperCase())} | ${when(x.created_at)}</small> <button class="btn bad sm" data-delsub="${esc(encodeURIComponent(x.email))}">Remove</button></div>`).join("") : `<div class="empty">No subscribers yet.</div>`}`;
+    window.__subs = subscribers;
+  }
+
   /* ---------- settings ---------- */
   async function viewSettings() {
     const res = await api("settings"), s = res.settings;
@@ -291,12 +308,15 @@
 
   /* ---------- events ---------- */
   document.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],[data-translate],[data-stripe-check],#logout,#rmImg");
+    const t = e.target.closest("[data-tab],[data-new],[data-edit],[data-back],[data-del],[data-delcat],[data-delmsg],[data-print],[data-csv],[data-translate],[data-stripe-check],[data-subcsv],[data-delsub],[data-rmextra],#logout,#rmImg");
     if (!t) return;
     try {
       if (t.dataset.tab) return show(t.dataset.tab);
       if (t.dataset.print) return printOrder(ORDERS.find((x) => String(x.id) === t.dataset.print), t.dataset.mode);
       if (t.hasAttribute("data-csv")) return exportCsv();
+      if (t.hasAttribute("data-subcsv")) { const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`; const blob = new Blob(["\ufeff" + ["Email,Language,Date", ...(window.__subs || []).map((x) => [x.email, x.lang, x.created_at].map(q).join(","))].join("\n")], { type: "text/csv;charset=utf-8" }); const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = "subscribers.csv"; document.body.appendChild(l); l.click(); l.remove(); return; }
+      if (t.dataset.delsub) { if (!confirm("Remove this subscriber?")) return; await api("subscribers/" + t.dataset.delsub, "DELETE"); return show("subscribers"); }
+      if (t.dataset.rmextra !== undefined) { EXTRA.splice(+t.dataset.rmextra, 1); return renderExtra(); }
       if (t.dataset.translate) return aiTranslate(t);
       if (t.hasAttribute("data-stripe-check")) return runStripeCheck(t);
       if (t.id === "logout") { await api("logout", "POST"); return showLogin(); }
@@ -317,6 +337,7 @@
       if (f.id === "pform") {
         const d = Object.fromEntries(new FormData(f));
         d.active = f.active.checked;
+        d.extraImageIds = EXTRA;
         const id = f.dataset.id;
         await api(id ? "products/" + id : "products", id ? "PUT" : "POST", d);
         toast("Product saved"); return show("products");
@@ -331,6 +352,13 @@
   });
 
   document.addEventListener("change", async (e) => {
+    if (e.target.id === "extraFile" && e.target.files.length) {
+      try {
+        for (const file of [...e.target.files]) { if (EXTRA.length >= 5) break; const dataUrl = await fileToJpeg(file); const { id } = await api("image", "POST", { dataUrl }); EXTRA.push(id); }
+        renderExtra(); e.target.value = ""; toast("Photos added. Click Save product.");
+      } catch (err) { toast(err.message); }
+      return;
+    }
     if (e.target.id !== "file" || !e.target.files[0]) return;
     const note = $("#imgNote");
     try {
